@@ -323,6 +323,18 @@ load_extensions() {
   done
 }
 
+execute_createdb_entrypoint() {
+  for f in /docker-entrypoint-createdb.d/*; do
+    case "$f" in
+      *.sh)     echo "$0: running $f"; . "$f" ;;
+      *.sql)    echo "$0: running $f"; psql -U ${PG_USER} < "$f"; echo ;;
+      *.sql.gz) echo "$0: running $f"; gunzip -c "$f" | psql -U ${PG_USER} ; echo ;;
+      *)        echo "$0: ignoring $f" ;;
+    esac
+  echo
+  done
+}
+
 create_database() {
   if [[ -n ${DB_NAME} ]]; then
     case $REPLICATION_MODE in
@@ -332,8 +344,14 @@ create_database() {
       *)
         for database in $(awk -F',' '{for (i = 1 ; i <= NF ; i++) print $i}' <<< "${DB_NAME}"); do
           echo "Creating database: ${database}..."
+          local dbcreated=0
           if [[ -z $(psql -U ${PG_USER} -Atc "SELECT 1 FROM pg_catalog.pg_database WHERE datname = '${database}'";) ]]; then
             psql -U ${PG_USER} -c "CREATE DATABASE \"${database}\" WITH TEMPLATE = \"${DB_TEMPLATE}\";" >/dev/null
+            dbcreated=1
+          fi
+
+          if [[ $dbcreated -eq 1 ]]; then
+            execute_createdb_entrypoint
           fi
 
           load_extensions ${database}
